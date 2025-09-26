@@ -8,17 +8,15 @@ import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import Razorpay from 'razorpay';
-import path from 'path'; // For handling file paths
-import { fileURLToPath } from 'url'; // For resolving ES module paths
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
 // --- 1. FIREBASE ADMIN SETUP ---
-// These lines are needed to correctly resolve paths in ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Correctly locate serviceAccountKey.json relative to Server.js
 const serviceAccount = JSON.parse(readFileSync(path.resolve(__dirname, 'serviceAccountKey.json'), 'utf8'));
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -41,10 +39,8 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 
 
-// --- 3. RAZORPAY INITIALIZATION (NOW OPTIONAL) ---
-let razorpay; // Declare razorpay variable
-
-// Check if both Razorpay keys exist in the environment variables
+// --- 3. RAZORPAY INITIALIZATION (OPTIONAL) ---
+let razorpay;
 if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
     razorpay = new Razorpay({
         key_id: process.env.RAZORPAY_KEY_ID,
@@ -52,14 +48,38 @@ if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
     });
     console.log("Razorpay initialized successfully.");
 } else {
-    // If keys are missing, log a warning and continue without initializing Razorpay
-    console.log("WARNING: Razorpay keys not found in environment. Payment routes will be disabled.");
+    console.log("WARNING: Razorpay keys not found. Payment routes will be disabled.");
 }
 
 
 // --- 4. EXPRESS APP SETUP ---
 const app = express();
-app.use(cors()); // Enable CORS for all routes
+
+// ✅ START OF CORS FIX
+// Define the specific URL of your deployed frontend.
+// Replace 'https://ecomfrontend.onrender.com' with your actual frontend URL if it's different.
+const allowedOrigins = ['https://ecomfrontend.onrender.com'];
+
+// You can add your local development URL here for testing
+// const allowedOrigins = ['https://ecomfrontend.onrender.com', 'http://localhost:5173'];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  }
+};
+
+// Use the configured CORS options
+app.use(cors(corsOptions));
+// ✅ END OF CORS FIX
+
 app.use(express.json());
 
 
@@ -98,8 +118,7 @@ app.delete("/api/products/:id", async (req, res) => {
 });
 
 
-// --- Payment Route (NOW OPTIONAL) ---
-// Only create this API route if Razorpay was successfully initialized
+// --- Payment Route (OPTIONAL) ---
 if (razorpay) {
     app.post('/api/create-order', async (req, res) => {
         const { amount } = req.body;
