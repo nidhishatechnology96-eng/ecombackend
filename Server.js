@@ -7,12 +7,19 @@ import { readFileSync } from 'fs';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
-import Razorpay from 'razorpay'; // <-- ADDED: Import Razorpay
+import Razorpay from 'razorpay';
+import path from 'path'; // For handling file paths
+import { fileURLToPath } from 'url'; // For resolving ES module paths
 
 dotenv.config();
 
 // --- 1. FIREBASE ADMIN SETUP ---
-const serviceAccount = JSON.parse(readFileSync('./serviceAccountKey.json', 'utf8'));
+// These lines are needed to correctly resolve paths in ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Correctly locate serviceAccountKey.json relative to Server.js
+const serviceAccount = JSON.parse(readFileSync(path.resolve(__dirname, 'serviceAccountKey.json'), 'utf8'));
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: process.env.FIREBASE_DATABASE_URL
@@ -34,11 +41,20 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 
 
-// --- 3. RAZORPAY INITIALIZATION (from your second file) ---
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// --- 3. RAZORPAY INITIALIZATION (NOW OPTIONAL) ---
+let razorpay; // Declare razorpay variable
+
+// Check if both Razorpay keys exist in the environment variables
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    razorpay = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+    console.log("Razorpay initialized successfully.");
+} else {
+    // If keys are missing, log a warning and continue without initializing Razorpay
+    console.log("WARNING: Razorpay keys not found in environment. Payment routes will be disabled.");
+}
 
 
 // --- 4. EXPRESS APP SETUP ---
@@ -69,7 +85,6 @@ app.post("/api/products", async (req, res) => {
     res.status(201).json({ id: docRef.id, ...newProduct });
 });
 
-// ... (Your other product routes for UPDATE and DELETE are fine) ...
 app.put("/api/products/:id", async (req, res) => {
     const { id } = req.params;
     await productsCollection.doc(id).update(req.body);
@@ -83,23 +98,33 @@ app.delete("/api/products/:id", async (req, res) => {
 });
 
 
-// --- NEW: Payment Route (from your second file) ---
-// Note: Changed path to /api/create-order for consistency
-app.post('/api/create-order', async (req, res) => {
-    const { amount } = req.body;
-    const options = {
-        amount: Math.round(amount * 100), // Amount in paise
-        currency: 'INR',
-        receipt: `receipt_order_${new Date().getTime()}`,
-    };
+// --- Payment Route (NOW OPTIONAL) ---
+// Only create this API route if Razorpay was successfully initialized
+if (razorpay) {
+    app.post('/api/create-order', async (req, res) => {
+        const { amount } = req.body;
+        const options = {
+            amount: Math.round(amount * 100), // Amount in paise
+            currency: 'INR',
+            receipt: `receipt_order_${new Date().getTime()}`,
+        };
 
-    try {
-        const order = await razorpay.orders.create(options);
-        console.log("Razorpay order created:", order);
-        res.json(order);
-    } catch (error) {
-        console.error("Razorpay Error:", error);
-        res.status(500).send("Error creating payment order");
-    }
+        try {
+            const order = await razorpay.orders.create(options);
+            console.log("Razorpay order created:", order);
+            res.json(order);
+        } catch (error) {
+            console.error("Razorpay Error:", error);
+            res.status(500).send("Error creating payment order");
+        }
+    });
+}
+
+
+// ========================================================
+// --- 6. START THE SERVER ---
+// ========================================================
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
 });
-
